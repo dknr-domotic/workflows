@@ -1,0 +1,27 @@
+# Reusable workflow: delete old workflow runs of a dknr-xxx repository
+# Called from each dknr-xxx repository, see README.md of this repository
+
+name: Delete old workflow runs
+
+on:
+  workflow_call:
+    inputs:
+      days:
+        description: 'retain days'
+        type: string
+        default: '15'
+
+jobs:
+  del_runs:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: ${{ inputs.days }}
+          keep_minimum_runs: 7

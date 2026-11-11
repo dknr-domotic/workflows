@@ -1,0 +1,11 @@
+# Set update schedule for GitHub Actions used by the shared DKNR workflows
+# Dependabot opens a pull request for each available update
+
+version: 2
+updates:
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      # Check for updates to GitHub Actions every week
+      interval: "weekly"

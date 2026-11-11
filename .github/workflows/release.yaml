@@ -1,0 +1,143 @@
+# Reusable workflow: build and push a DKNR docker image release
+# Called from each dknr-xxx repository, see README.md of this repository
+#
+# - creates the branch and the tag <version>
+# - builds and pushes <namespace>/<image>:<version> and :latest to Docker Hub,
+#   and the same tags to the Github registry
+# - optional extra image (ex: dknr-voice-vosk) built from another folder
+
+name: Build and push docker image release
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Release version'
+        type: string
+        required: true
+      namespace:
+        description: 'Docker Hub namespace'
+        type: string
+        default: 'jcpd'
+      image:
+        description: 'Docker image name (default: repository name)'
+        type: string
+        default: ''
+      extra_context:
+        description: 'Folder of an extra image to build (ex: ./docker/vosk)'
+        type: string
+        default: ''
+      extra_suffix:
+        description: 'Suffix of the extra image name (ex: vosk)'
+        type: string
+        default: ''
+
+jobs:
+  do_image:
+    name: Build and push docker image release
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: write
+      attestations: write
+      id-token: write
+    env:
+      DKNR_NAMESPACE: ${{ inputs.namespace }}
+      DKNR_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Set image names
+        run: |
+          IMAGE='${{ inputs.image }}'
+          [ -n "$IMAGE" ] || IMAGE="${GITHUB_REPOSITORY#*/}"
+          echo "DKNR_IMAGE=${IMAGE,,}" >> $GITHUB_ENV
+          echo "GITHUB_REPOSITORY=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
+      - name: Check out the repo
+        uses: actions/checkout@v7
+
+      - name: Create repository branch
+        id: create
+        uses: peterjgrainger/action-create-branch@v4.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          branch: ${{ env.DKNR_VERSION }}
+
+      - name: notcreated
+        if: (steps.create.outputs.created != 'true')
+        run: |
+          echo "Branch $DKNR_VERSION has not been created." >> $GITHUB_STEP_SUMMARY
+
+      - name: created
+        if: (steps.create.outputs.created == 'true')
+        run: |
+          echo "Branch $DKNR_VERSION has been created." >> $GITHUB_STEP_SUMMARY
+
+      - name: Create tag
+        uses: mathieudutour/github-tag-action@v7
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          custom_tag: ${{ env.DKNR_VERSION }}
+
+      - name: Check out the repo
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.DKNR_VERSION }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Log in to Github registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push images
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          sbom: true
+          push: true
+          tags: |
+            ${{ env.DKNR_NAMESPACE }}/${{ env.DKNR_IMAGE }}:${{ env.DKNR_VERSION }}
+            ${{ env.DKNR_NAMESPACE }}/${{ env.DKNR_IMAGE }}:latest
+            ghcr.io/${{ env.GITHUB_REPOSITORY }}:${{ env.DKNR_VERSION }}
+            ghcr.io/${{ env.GITHUB_REPOSITORY }}:latest
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          no-cache: true
+
+      - name: Build and push extra image
+        if: inputs.extra_context != ''
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ inputs.extra_context }}
+          push: true
+          tags: |
+            ${{ env.DKNR_NAMESPACE }}/${{ env.DKNR_IMAGE }}-${{ inputs.extra_suffix }}:${{ env.DKNR_VERSION }}
+            ${{ env.DKNR_NAMESPACE }}/${{ env.DKNR_IMAGE }}-${{ inputs.extra_suffix }}:latest
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          no-cache: true
+
+      - name: Docker Scout stable
+        id: docker-scout
+        uses: docker/scout-action@v1.29.0
+        with:
+          command: environment,quickview,cves
+          image: ${{ env.DKNR_NAMESPACE }}/${{ env.DKNR_IMAGE }}:${{ env.DKNR_VERSION }}
+          environment: stable
+          organization: ${{ env.DKNR_NAMESPACE }}
+          write-comment: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}

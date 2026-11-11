@@ -1,0 +1,40 @@
+# Reusable workflow: copy README.md and description of a dknr-xxx repository to Docker Hub
+# Called from each dknr-xxx repository, see README.md of this repository
+
+name: Update Docker Hub Description
+
+on:
+  workflow_call:
+    inputs:
+      namespace:
+        description: 'Docker Hub namespace'
+        type: string
+        default: 'jcpd'
+      image:
+        description: 'Docker image name (default: repository name)'
+        type: string
+        default: ''
+
+jobs:
+  dockerHubDescription:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Set image name
+        run: |
+          IMAGE='${{ inputs.image }}'
+          [ -n "$IMAGE" ] || IMAGE="${GITHUB_REPOSITORY#*/}"
+          echo "DKNR_IMAGE=${IMAGE,,}" >> $GITHUB_ENV
+
+      - uses: actions/checkout@v7
+
+      - name: Docker Hub Description
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+          repository: ${{ inputs.namespace }}/${{ env.DKNR_IMAGE }}
+          short-description: ${{ github.event.repository.description }}
+          readme-filepath: ./README.md
+          enable-url-completion: true
